@@ -1,23 +1,5 @@
-<%- include("templates/header") %>
-<table style="margin-left: 30px;">
-<h1 style = "margin-left: 30px;">Users</h1>
+<%- include('templates/header') %>
 
-     <% users.forEach(user => { %>
-    <tr>
-      <td>   <%= user.name %>  (<%= user.userType %>)</td>
-      <td>
-        <form action="/promote" method="post">
-            <input type="hidden" name="email" value="<%= user.email %>">
-            <button class="btn btn-danger rounded-pill px-2" type="submit">Promote to admin</button>
-          </form>
-        </td>
-        <td>
-          <form action="/demote" method="post">
-            <input type="hidden" name="email" value="<%= user.email %>">
-            <button class="btn btn-success rounded-pill px-2" type="submit">Demote to user</button>
-          </form>
-      </td>
-    </tr>
-  <% }); %>
-</table>
-<%- include("templates/footer") %>
+<%- include('templates/user', {users: users}) %>
+
+<%- include('templates/footer') %>
