@@ -2,22 +2,21 @@
 require("./utils.js");
 
 require('dotenv').config();
+
 const express = require('express');
 const session = require('express-session');
 const MongoStore = require('connect-mongo');
 const bcrypt = require('bcrypt');
 const saltRounds = 12;
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 4500;
 
 const app = express();
 
 const Joi = require("joi");
-const mongoSanitize = require('express-mongo-sanitize');
 
-const expireTime = 24 * 60 * 60 * 1000; //expires after 1 day  (hours * minutes * seconds * millis)
+const expireTime = 60 * 60 * 1000;
 
-/* secret information section */
 const mongodb_host = process.env.MONGODB_HOST;
 const mongodb_user = process.env.MONGODB_USER;
 const mongodb_password = process.env.MONGODB_PASSWORD;
@@ -25,220 +24,305 @@ const mongodb_database = process.env.MONGODB_DATABASE;
 const mongodb_session_secret = process.env.MONGODB_SESSION_SECRET;
 
 const node_session_secret = process.env.NODE_SESSION_SECRET;
-/* END secret section */
 
-var {database} = include('databaseConnection');
+
+var { database } = include('databaseConnection');
 
 const userCollection = database.db(mongodb_database).collection('users');
 
-app.use(express.urlencoded({extended: false}));
-
-app.use(mongoSanitize(
-    //{replaceWith: '%'}
-));
-
-// app.use(
-//     mongoSanitize({
-//       onSanitize: ({ req, key }) => {
-//         console.warn(`This request[${key}] is sanitized`);
-//       },
-//     }),
-//   );
+app.use(express.urlencoded({ extended: false }));
 
 var mongoStore = MongoStore.create({
-	mongoUrl: `mongodb+srv://${mongodb_user}:${mongodb_password}@${mongodb_host}/sessions`,
-	crypto: {
-		secret: mongodb_session_secret
-	}
+    mongoUrl: `mongodb+srv://${mongodb_user}:${mongodb_password}@${mongodb_host}/sessions`,
+    crypto: {
+        secret: mongodb_session_secret
+    }
 })
 
-app.use(session({ 
+app.use(session({
     secret: node_session_secret,
-	store: mongoStore, //default is memory store 
-	saveUninitialized: false, 
-	resave: true
+    store: mongoStore,
+    saveUninitialized: false,
+    resave: true,
+    cookie: {
+        maxAge: expireTime
+    }
 }
 ));
 
-app.get('/', (req,res) => {
-    res.send("<h1>Hello World!</h1>");
+app.set('view engine', 'ejs');
+
+
+
+
+app.get('/', (req, res) => {
+    var missingEmail = req.query.missing;
+ 
+    if (missingEmail) {
+        html2 += "<br> email is required";
+    }
+    res.render("index");
+
 });
 
-app.get('/nosql-injection', async (req,res) => {
-	var name = req.query.user;
+app.get('/signup', (req, res) => {
+    var missingEmail = req.query.missing;
+    
+    res.render("signup");
+});
 
-	if (!name) {
-		res.send(`<h3>no user provided - try /nosql-injection?user=name</h3> <h3>or /nosql-injection?user[$ne]=name</h3>`);
-		return;
-	}
-	//console.log("user: "+name);
 
-	const schema = Joi.string().max(100).required();
-	const validationResult = schema.validate(name);
+app.post('/signupsubmit', async (req, res) => {
+    const name = req.body.name;
+    const email = req.body.email;
+    const password = req.body.password;
 
-    var invalid = false;
-	//If we didn't use Joi to validate and check for a valid URL parameter below
-	// we could run our userCollection.find and it would be possible to attack.
-	// A URL parameter of user[$ne]=name would get executed as a MongoDB command
-	// and may result in revealing information about all users or a successful
-	// login without knowing the correct password.
-	if (validationResult.error != null) { 
-        invalid = true;
-	    console.log(validationResult.error);
-	//    res.send("<h1 style='color:darkred;'>A NoSQL injection attack was detected!!</h1>");
-	//    return;
-	}	
-    var numRows = -1;
-    //var numRows2 = -1;
-    try {
-    	const result = await userCollection.find({name: name}).project({username: 1, password: 1, _id: 1}).toArray();
-    	//const result2 = await userCollection.find("{name: "+name).project({username: 1, password: 1, _id: 1}).toArray(); //mongoDB already prevents using catenated strings like this
-        //console.log(result);
-        numRows = result.length;
-        //numRows2 = result2.length;
+    if (!name || !email || !password) {
+        const errorMessage = 'Please fill in all three fields.';
+        const html = `
+        <p>${errorMessage}</p>
+        <a href="/signup?missing=true">Back to signup page</a>
+      `;
+        res.send(html);
+        return;
     }
-    catch (err) {
-        console.log(err);
-        res.send(`<h1>Error querying db</h1>`);
+    const existingUser = await userCollection.findOne({ email });
+    if (existingUser) {
+        const errorMessage = 'An account with this email address already exists.';
+        const html = `
+        <p>${errorMessage}</p>
+        <a href="/signup">Back to signup page</a>
+      `;
+        res.send(html);
         return;
     }
 
-    console.log(`invalid: ${invalid} - numRows: ${numRows} - user: `,name);
+    try {
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+        const newUser = { name, email, password: hashedPassword , userType: 'guest'};
+        const result = await userCollection.insertOne(newUser);
+        console.log(`Created new user: ${result.insertedId}`);
 
-    // var query = {
-    //     $where: "this.name === '" + req.body.username + "'"
-    // }
+        req.session.name = name;
+        req.session.email = email;
 
-    // const result2 = await userCollection.find(query).toArray(); //$where queries are not allowed.
-    
-    // console.log(result2);
+        res.redirect('/members');
 
-    res.send(`<h1>Hello</h1> <h3> num rows: ${numRows}</h3>`); 
-    //res.send(`<h1>Hello</h1>`);
-
-});
-
-app.get('/about', (req,res) => {
-    var color = req.query.color;
-
-    res.send("<h1 style='color:"+color+";'>Patrick Guichon</h1>");
-});
-
-app.get('/contact', (req,res) => {
-    var missingEmail = req.query.missing;
-    var html = `
-        email address:
-        <form action='/submitEmail' method='post'>
-            <input name='email' type='text' placeholder='email'>
-            <button>Submit</button>
-        </form>
-    `;
-    if (missingEmail) {
-        html += "<br> email is required";
-    }
-    res.send(html);
-});
-
-app.post('/submitEmail', (req,res) => {
-    var email = req.body.email;
-    if (!email) {
-        res.redirect('/contact?missing=1');
-    }
-    else {
-        res.send("Thanks for subscribing with your email: "+email);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Internal Server Error');
     }
 });
 
 
-app.get('/createUser', (req,res) => {
-    var html = `
-    create user
-    <form action='/submitUser' method='post'>
-    <input name='username' type='text' placeholder='username'>
-    <input name='password' type='password' placeholder='password'>
-    <button>Submit</button>
-    </form>
-    `;
-    res.send(html);
+
+
+app.get('/nosql-injection', async (req, res) => {
+    var username = req.query.user;
+
+    if (!username) {
+        res.send(`<h3>no user provided - try /nosql-injection?user=name</h3> <h3>or /nosql-injection?user[$ne]=name</h3>`);
+        return;
+    }
+    console.log("user: " + username);
+
+    const schema = Joi.string().max(20).required();
+    const validationResult = schema.validate(username);
+
+    if (validationResult.error != null) {
+        console.log(validationResult.error);
+        res.send("<h1 style='color:darkred;'>A NoSQL injection attack was detected!!</h1>");
+        return;
+    }
+
+    const result = await userCollection.find({ username: username }).project({ username: 1, password: 1, _id: 1 }).toArray();
+
+    console.log(result);
+
+    res.send(`<h1>Hello ${username}</h1>`);
 });
 
 
-app.get('/login', (req,res) => {
-    var html = `
-    log in
-    <form action='/loggingin' method='post'>
-    <input name='username' type='text' placeholder='username'>
-    <input name='password' type='password' placeholder='password'>
-    <button>Submit</button>
-    </form>
-    `;
-    res.send(html);
+
+
+app.get('/login', (req, res) => {
+    var missingCredentials = req.query.missing;
+    var loginFailed = req.query.failed;
+  
+    if (missingCredentials) {
+    "<br> Email and password are required";
+    }
+    if (loginFailed) {
+      "<br> Login failed";
+    }
+    res.render("login");
 });
 
-app.post('/submitUser', async (req,res) => {
+app.post('/loginsubmit', async (req, res) => {
+    const email = req.body.email;
+    const password = req.body.password;
+
+    if (email && !password) {
+        const errorMessage = 'Invalid password.';
+        const html = `
+            <p>${errorMessage}</p>
+            <a href="/login?missing=true">Try again</a>
+        `;
+        res.send(html);
+        return;
+    }
+    if (!email || !password) {
+        const errorMessage = 'Invalid email/password combination.';
+        const html = `
+            <p>${errorMessage}</p>
+            <a href="/login?missing=true">Try again</a>
+        `;
+        res.send(html);
+        return;
+    }
+
+    const existingUser = await userCollection.findOne({ email });
+    if (!existingUser) {
+        const errorMessage = 'Invalid email/password combination.';
+        const html = `
+            <p>${errorMessage}</p>
+            <a href="/login">Try again</a>
+        `;
+        res.send(html);
+        return;
+    }
+
+    try {
+        const passwordMatches = await bcrypt.compare(password, existingUser.password);
+        if (!passwordMatches) {
+            const errorMessage = 'Invalid password .';
+            const html = `
+                <p>${errorMessage}</p>
+                <a href="/login?failed=true">Try again</a>
+            `;
+            res.send(html);
+            return;
+        }
+        
+        req.session.userId = existingUser._id;
+        req.session.email = existingUser.email;
+        req.session.name = existingUser.name;
+        req.session.loggedIn = true;
+        req.session.userType = existingUser.userType; // set the userType from the newUser object
+        req.session.save();
+        res.redirect('/members');
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+app.get('/members2', requireAuth, (req, res) => {
+    const { name } = req.session;
+
+    res.send(`
+      <p>Hello ${name}!</p>
+      <form action="/membersPage" method="get">
+        <input type="hidden" name="name" value="${name}">
+        <button type="submit">Go to Members Area</button>
+      </form>
+      <form action="/logout" method="POST">
+        <button type="submit">Log out</button>
+      </form>
+    `);
+ 
+
+});
+
+
+app.post('/submitUser', async (req, res) => {
     var username = req.body.username;
     var password = req.body.password;
 
-	const schema = Joi.object(
-		{
-			username: Joi.string().alphanum().max(20).required(),
-			password: Joi.string().max(20).required()
-		});
-	
-	const validationResult = schema.validate({username, password});
-	if (validationResult.error != null) {
-	   console.log(validationResult.error);
-	   res.redirect("/createUser");
-	   return;
-   }
+    const schema = Joi.object(
+        {
+            username: Joi.string().alphanum().max(20).required(),
+            password: Joi.string().max(20).required()
+        });
+
+    const validationResult = schema.validate({ username, password });
+    if (validationResult.error != null) {
+        console.log(validationResult.error);
+        res.redirect("/createUser");
+        return;
+    }
 
     var hashedPassword = await bcrypt.hash(password, saltRounds);
-	
-	await userCollection.insertOne({username: username, password: hashedPassword});
-	console.log("Inserted user");
+
+    await userCollection.insertOne({ username: username, password: hashedPassword });
+    console.log("Inserted user");
 
     var html = "successfully created user";
     res.send(html);
 });
-    
 
-app.post('/loggingin', async (req,res) => {
-    var username = req.body.username;
-    var password = req.body.password;
+app.get('/cat/:id', (req, res) => {
+    const catIds = ['1', '2', '4'];
+    const catId = req.params.id;
 
-	const schema = Joi.string().max(20).required();
-	const validationResult = schema.validate(username);
-	if (validationResult.error != null) {
-	   console.log(validationResult.error);
-	   res.redirect("/login");
-	   return;
-	}
+    if (catIds.includes(catId)) {
+        const catNames = {
+            '1': 'Fluffy',
+            '2': 'Socks',
+            '4': 'Mittens'
+        };
+        const catName = catNames[catId];
+        const catGifs = {
+            '1': '/fluffy.gif',
+            '2': '/socks.gif',
+            '4': '/cat4.gif'
+        };
+        const catGif = catGifs[catId];
 
-	const result = await userCollection.find({username: username}).project({username: 1, password: 1, _id: 1}).toArray();
+        res.send(`${catName}: <img src='${catGif}' style='width:250px;'>`);
+    } else {
+        res.send(`Invalid cat id: ${catId}`);
+    }
+});
+// server.js
+app.get('/members', requireAuth, (req, res) => {
+    const { name } = req.session;
+    const catIds = ['1', '2', '4'];
+    const randomCatId = catIds[Math.floor(Math.random() * catIds.length)];
+    const catNames = {
+      '1': 'Fluffy',
+      '2': 'Socks',
+      '4': 'Mittens'
+    };
+    const catName = catNames[randomCatId];
+    const catGifs = {
+      '1': '/fluffy.gif',
+      '2': '/socks.gif',
+      '4': '/cat4.gif'
+    };
+    const catGif = catGifs[randomCatId];
+  
+    res.render('cats', { name, catGif });
+  });
+  
 
-	console.log(result);
-	if (result.length != 1) {
-		console.log("user not found");
-		res.redirect("/login");
-		return;
-	}
-	if (await bcrypt.compare(password, result[0].password)) {
-		console.log("correct password");
-		req.session.authenticated = true;
-		req.session.username = username;
-		req.session.cookie.maxAge = expireTime;
 
-		res.redirect('/loggedIn');
-		return;
-	}
-	else {
-		console.log("incorrect password");
-		res.redirect("/login");
-		return;
-	}
+function requireAuth(req, res, next) {
+    if (!req.session.email) {
+        res.redirect('/');
+    } else {
+        next();
+    }
+}
+
+
+app.post('/logout', (req, res) => {
+    req.session.destroy();
+    res.redirect('/');
 });
 
-app.get('/loggedin', (req,res) => {
+
+app.get('/loggedin', (req, res) => {
     if (!req.session.authenticated) {
         res.redirect('/login');
     }
@@ -248,8 +332,8 @@ app.get('/loggedin', (req,res) => {
     res.send(html);
 });
 
-app.get('/logout', (req,res) => {
-	req.session.destroy();
+app.get('/logout', (req, res) => {
+    req.session.destroy();
     var html = `
     You are logged out.
     `;
@@ -257,29 +341,98 @@ app.get('/logout', (req,res) => {
 });
 
 
-app.get('/cat/:id', (req,res) => {
 
-    var cat = req.params.id;
 
-    if (cat == 1) {
-        res.send("Fluffy: <img src='/fluffy.gif' style='width:250px;'>");
+
+// Middleware function to check if user is an admin
+function isAdmin(req, res, next) {
+    if (req.session.userType !== 'admin') {
+      res.redirect('/login');
+    } else {
+      next();
     }
-    else if (cat == 2) {
-        res.send("Socks: <img src='/socks.gif' style='width:250px;'>");
+  }
+  
+  // Route to display admin page
+  app.get('/admin', isAdmin, async (req, res) => {
+    // Retrieve all users from the database
+    const users = await userCollection.find().toArray();
+    
+    // Render admin.ejs with the user data
+    res.render('admin', { users });
+  });
+  
+  // Route to promote a user to admin
+  app.post('/promote', isAdmin, async (req, res) => {
+    const { email } = req.body;
+    
+    // Check if user exists
+    const user = await userCollection.findOne({ email });
+    if (!user) {
+      res.status(400).send('User not found');
+      return;
     }
-    else {
-        res.send("Invalid cat id: "+cat);
+    
+    // Check if user is already an admin
+    if (user.userType === 'admin') {
+      res.redirect('/admin');
+      return;
     }
-});
+    
+    // Update user's userType to admin
+    const result = await userCollection.updateOne(
+      { email },
+      { $set: { userType: 'admin' } }
+    );
+    
+    // Check if update was successful
+    if (result.modifiedCount === 1) {
+      res.redirect('/admin');
+    } else {
+      res.status(500).send('Internal Server Error');
+    }
+  });
+  
+  // Route to demote an admin to guest
+  app.post('/demote', isAdmin, async (req, res) => {
+    const { email } = req.body;
+    
+    // Check if user exists
+    const user = await userCollection.findOne({ email });
+    if (!user) {
+      res.status(400).send('User not found');
+      return;
+    }
+    
+    // Check if user is a guest (i.e., not an admin)
+    if (user.userType !== 'admin') {
+      res.redirect('/admin');
+      return;
+    }
+    
+    // Update user's userType to guest
+    const result = await userCollection.updateOne(
+      { email },
+      { $set: { userType: 'guest' } }
+    );
+    
+    // Check if update was successful
+    if (result.modifiedCount === 1) {
+      res.redirect('/admin');
+    } else {
+      res.status(500).send('Internal Server Error');
+    }
+  });
+  
 
 
 app.use(express.static(__dirname + "/public"));
 
-app.get("*", (req,res) => {
-	res.status(404);
-	res.send("Page not found - 404");
+app.get("*", (req, res) => {
+    res.status(404);
+    res.render("404");
 })
 
 app.listen(port, () => {
-	console.log("Node application listening on port "+port);
+    console.log("Node application listening on port " + port);
 }); 
