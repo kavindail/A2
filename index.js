@@ -208,7 +208,7 @@ app.post('/loginsubmit', async (req, res) => {
         req.session.email = existingUser.email;
         req.session.name = existingUser.name;
         req.session.loggedIn = true;
-        req.session.userType = existingUser.userType; // set the userType from the newUser object
+        req.session.userType = existingUser.userType; 
         req.session.save();
         res.redirect('/members');
     } catch (err) {
@@ -284,7 +284,7 @@ app.get('/cat/:id', (req, res) => {
         res.send(`Invalid cat id: ${catId}`);
     }
 });
-// server.js
+
 app.get('/members', requireAuth, (req, res) => {
     const { name } = req.session;
     const catGifs = {
@@ -292,10 +292,10 @@ app.get('/members', requireAuth, (req, res) => {
       '2': '/socks.gif',
       '4': '/cat4.gif'
     };
-    const catIds = Object.keys(catGifs); // Get all cat IDs from catGifs object
-    const catGif1 = catGifs[catIds[0]]; // Get the first cat GIF
-    const catGif2 = catGifs[catIds[1]]; // Get the second cat GIF
-    const catGif3 = catGifs[catIds[2]]; // Get the third cat GIF
+    const catIds = Object.keys(catGifs);
+        const catGif1 = catGifs[catIds[0]]; 
+    const catGif2 = catGifs[catIds[1]]; 
+    const catGif3 = catGifs[catIds[2]]; 
   
     res.render('cats', { name, catGif1, catGif2, catGif3 });
   });
@@ -355,61 +355,54 @@ function isAdmin(req, res, next) {
   });
   
   
-  // Route to promote a user to admin
+
   app.post('/promote', isAdmin, async (req, res) => {
     const { email } = req.body;
     
-    // Check if user exists
+
     const user = await userCollection.findOne({ email });
     if (!user) {
       res.status(400).send('User not found');
       return;
     }
-    
-    // Check if user is already an admin
+
     if (user.userType === 'admin') {
       res.redirect('/admin');
       return;
     }
-    
-    // Update user's userType to admin
+
     const result = await userCollection.updateOne(
       { email },
       { $set: { userType: 'admin' } }
     );
-    
-    // Check if update was successful
+
     if (result.modifiedCount === 1) {
       res.redirect('/admin');
     } else {
       res.status(500).send('Internal Server Error');
     }
   });
-  
-  // Route to demote an admin to user
+
   app.post('/demote', isAdmin, async (req, res) => {
     const { email } = req.body;
-    
-    // Check if user exists
+
     const user = await userCollection.findOne({ email });
     if (!user) {
       res.status(400).send('User not found');
       return;
     }
     
-    // Check if user is a user (i.e., not an admin)
+
     if (user.userType !== 'admin') {
       res.redirect('/admin');
       return;
     }
-    
-    // Update user's userType to user
+
     const result = await userCollection.updateOne(
       { email },
       { $set: { userType: 'user' } }
     );
-    
-    // Check if update was successful
+
     if (result.modifiedCount === 1) {
       res.redirect('/admin');
     } else {
