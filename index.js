@@ -99,7 +99,7 @@ app.post('/signupsubmit', async (req, res) => {
 
     try {
         const hashedPassword = await bcrypt.hash(password, saltRounds);
-        const newUser = { name, email, password: hashedPassword , userType: 'guest'};
+        const newUser = { name, email, password: hashedPassword , userType: 'user'};
         const result = await userCollection.insertOne(newUser);
         console.log(`Created new user: ${result.insertedId}`);
 
@@ -287,23 +287,19 @@ app.get('/cat/:id', (req, res) => {
 // server.js
 app.get('/members', requireAuth, (req, res) => {
     const { name } = req.session;
-    const catIds = ['1', '2', '4'];
-    const randomCatId = catIds[Math.floor(Math.random() * catIds.length)];
-    const catNames = {
-      '1': 'Fluffy',
-      '2': 'Socks',
-      '4': 'Mittens'
-    };
-    const catName = catNames[randomCatId];
     const catGifs = {
       '1': '/fluffy.gif',
       '2': '/socks.gif',
       '4': '/cat4.gif'
     };
-    const catGif = catGifs[randomCatId];
+    const catIds = Object.keys(catGifs); // Get all cat IDs from catGifs object
+    const catGif1 = catGifs[catIds[0]]; // Get the first cat GIF
+    const catGif2 = catGifs[catIds[1]]; // Get the second cat GIF
+    const catGif3 = catGifs[catIds[2]]; // Get the third cat GIF
   
-    res.render('cats', { name, catGif });
+    res.render('cats', { name, catGif1, catGif2, catGif3 });
   });
+  
   
 
 
@@ -343,24 +339,21 @@ app.get('/logout', (req, res) => {
 
 
 
-
-// Middleware function to check if user is an admin
 function isAdmin(req, res, next) {
-    if (req.session.userType !== 'admin') {
+    if (!req.session || !req.session.userType) {
       res.redirect('/login');
+    } else if (req.session.userType !== 'admin') {
+      res.status(403).render('403');
     } else {
       next();
     }
   }
   
-  // Route to display admin page
   app.get('/admin', isAdmin, async (req, res) => {
-    // Retrieve all users from the database
     const users = await userCollection.find().toArray();
-    
-    // Render admin.ejs with the user data
     res.render('admin', { users });
   });
+  
   
   // Route to promote a user to admin
   app.post('/promote', isAdmin, async (req, res) => {
@@ -393,7 +386,7 @@ function isAdmin(req, res, next) {
     }
   });
   
-  // Route to demote an admin to guest
+  // Route to demote an admin to user
   app.post('/demote', isAdmin, async (req, res) => {
     const { email } = req.body;
     
@@ -404,16 +397,16 @@ function isAdmin(req, res, next) {
       return;
     }
     
-    // Check if user is a guest (i.e., not an admin)
+    // Check if user is a user (i.e., not an admin)
     if (user.userType !== 'admin') {
       res.redirect('/admin');
       return;
     }
     
-    // Update user's userType to guest
+    // Update user's userType to user
     const result = await userCollection.updateOne(
       { email },
-      { $set: { userType: 'guest' } }
+      { $set: { userType: 'user' } }
     );
     
     // Check if update was successful
